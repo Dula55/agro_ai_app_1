@@ -36,8 +36,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          # Upload your specific directory containing index.html
+          # Change this path based on where your index.html is located:
+          path: './public'  # or './dist' or './build' or '.' if index.html is in root
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
