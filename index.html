@@ -192,7 +192,7 @@
   <section id="outputSection" class="hidden bg-white rounded-2xl shadow border p-6 space-y-4">
     <div id="soilSummary" class="text-sm text-slate-600"></div>
 
-    <div id="loading" class="flex items-center gap-3">
+    <div id="loading" class="flex items-center gap-3 hidden">
       <div class="loading-spinner"></div>
       <div class="text-gray-600">Analyzing soil conditions…</div>
     </div>
@@ -217,13 +217,171 @@
   </section>
 </main>
 
-<!-- PWA service worker and manifest -->
-<script id="sw-code" type="text/plain">
-// ... (use the exact same SW code from original, unchanged) ...
-</script>
+<!-- NOTE: service worker / manifest omitted to avoid 404 when files are not present.
+     If you want PWA features, add a proper /sw.js and manifest.json at the site root. -->
 
 <script>
-// ... (use the exact same JS client-side logic from original, unchanged) ...
+/* Minimal client-side logic so page works without external files.
+   Handles: toggles, camera input, zone detection (geolocation), fake "analysis" output.
+*/
+
+const manualToggleBtn = document.getElementById('manualToggleBtn');
+const manualForm = document.getElementById('manualForm');
+const scanBtn = document.getElementById('scanBtn');
+const cameraInput = document.getElementById('cameraInput');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const resetBtn = document.getElementById('resetBtn');
+const outputSection = document.getElementById('outputSection');
+const loading = document.getElementById('loading');
+const results = document.getElementById('results');
+const recommendations = document.getElementById('recommendations');
+const soilSummary = document.getElementById('soilSummary');
+const newAnalysisBtn = document.getElementById('newAnalysisBtn');
+const useGeoBtn = document.getElementById('useGeoBtn');
+const zoneSelect = document.getElementById('zoneSelect');
+const clearZoneBtn = document.getElementById('clearZoneBtn');
+const detectBtnSmall = document.getElementById('detectBtnSmall');
+
+manualToggleBtn.addEventListener('click', () => {
+  manualForm.classList.toggle('hidden');
+  window.scrollTo({ top: manualForm.getBoundingClientRect().top + window.scrollY - 20, behavior: 'smooth' });
+});
+
+// camera flow (opens phone camera on mobile)
+scanBtn.addEventListener('click', () => cameraInput.click());
+cameraInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  soilSummary.textContent = `Image selected: ${file.name}. Using visual cues as input...`;
+  runAnalysisMock();
+});
+
+analyzeBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  // collect simple inputs
+  const texture = document.getElementById('texture').value;
+  const color = document.getElementById('color').value;
+  const drainage = document.getElementById('drainage').value;
+  const pH = document.getElementById('pH').value;
+  const N = document.getElementById('N').value;
+  soilSummary.textContent = `Texture: ${texture}, Color: ${color}, Drainage: ${drainage}, pH: ${pH || 'N/A'}, N: ${N || 'N/A'}`;
+  runAnalysisMock();
+});
+
+resetBtn.addEventListener('click', () => {
+  document.querySelectorAll('#manualForm input, #manualForm select').forEach(i => i.value = '');
+  soilSummary.textContent = '';
+  outputSection.classList.add('hidden');
+});
+
+// zone detection via Geolocation
+useGeoBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    alert('Geolocation not supported in this browser.');
+    return;
+  }
+  useGeoBtn.disabled = true;
+  useGeoBtn.textContent = 'Detecting…';
+  navigator.geolocation.getCurrentPosition(pos => {
+    useGeoBtn.disabled = false;
+    useGeoBtn.textContent = 'Use my location';
+    const { latitude } = pos.coords;
+    // very simple lat-based zone guess for Nigeria (approx):
+    let zoneGuess = '';
+    if (latitude < 4.5) zoneGuess = 'mangrove';
+    else if (latitude < 6.5) zoneGuess = 'rainforest';
+    else if (latitude < 8.5) zoneGuess = 'derived_savanna';
+    else if (latitude < 10.5) zoneGuess = 'southern_guinea';
+    else if (latitude < 12.5) zoneGuess = 'northern_guinea';
+    else if (latitude < 13.8) zoneGuess = 'sudan';
+    else zoneGuess = 'sahel';
+    zoneSelect.value = zoneGuess;
+    document.getElementById('zoneHint').textContent = `Detected latitude ${latitude.toFixed(3)} — suggested zone ${zoneSelect.options[zoneSelect.selectedIndex].text}. You can override.`;
+  }, err => {
+    useGeoBtn.disabled = false;
+    useGeoBtn.textContent = 'Use my location';
+    alert('Unable to detect location: ' + (err.message || 'permission denied'));
+  });
+});
+
+clearZoneBtn.addEventListener('click', () => {
+  zoneSelect.value = '';
+  document.getElementById('zoneHint').textContent = 'Zone cleared.';
+});
+
+detectBtnSmall.addEventListener('click', () => {
+  document.getElementById('zoneSelect').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+// fake analysis pipeline (simulates model) — replace later with real API
+function runAnalysisMock() {
+  outputSection.classList.remove('hidden');
+  results.classList.add('hidden');
+  loading.classList.remove('hidden');
+
+  // simulate processing delay
+  setTimeout(() => {
+    loading.classList.add('hidden');
+    results.classList.remove('hidden');
+    renderRecommendations(generateMockRecommendations());
+    window.scrollTo({ top: outputSection.getBoundingClientRect().top + window.scrollY - 20, behavior: 'smooth' });
+  }, 900);
+}
+
+function generateMockRecommendations() {
+  // recommendations depend on selected zone and pH roughly
+  const zone = zoneSelect.value || 'general';
+  const pH = parseFloat(document.getElementById('pH').value) || 6.5;
+  const list = [];
+
+  if (zone === 'mangrove' || zone === 'rainforest') {
+    list.push({ crop: 'Cassava', conf: 0.89, notes: 'Tolerates heavy soils; high yield' });
+    list.push({ crop: 'Plantain', conf: 0.78, notes: 'Moisture-loving' });
+  } else if (zone === 'sahel' || zone === 'sudan') {
+    list.push({ crop: 'Sorghum', conf: 0.86, notes: 'Drought tolerant' });
+    list.push({ crop: 'Cowpea', conf: 0.72, notes: 'Improves soil N' });
+  } else {
+    // general / savanna
+    list.push({ crop: 'Maize', conf: 0.83, notes: 'High demand crop' });
+    list.push({ crop: 'Groundnut', conf: 0.76, notes: 'Fixes nitrogen' });
+  }
+
+  // slight pH adjustment
+  list.forEach(r => r.conf = Math.max(0.4, Math.min(0.99, r.conf - Math.abs(pH - 6.5) * 0.06)));
+  return list;
+}
+
+function renderRecommendations(items) {
+  recommendations.innerHTML = '';
+  items.forEach(it => {
+    const el = document.createElement('div');
+    el.className = 'bg-slate-50 p-4 rounded-lg border flex flex-col gap-2';
+    el.innerHTML = `
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="text-sm font-semibold text-slate-800">${it.crop}</div>
+          <div class="text-xs text-slate-500">${it.notes}</div>
+        </div>
+        <div class="text-sm text-slate-700">${Math.round(it.conf * 100)}%</div>
+      </div>
+      <div class="conf-bar mt-2"><div class="conf-fill" style="width:${Math.round(it.conf*100)}%"></div></div>
+    `;
+    recommendations.appendChild(el);
+  });
+}
+
+newAnalysisBtn.addEventListener('click', () => {
+  outputSection.classList.add('hidden');
+  results.classList.add('hidden');
+  soilSummary.textContent = '';
+});
+
+// Safe: do NOT register a service worker automatically to avoid 404 when /sw.js is absent.
+// If you add a real sw.js at your site root, you can enable the registration below:
+//
+// if ('serviceWorker' in navigator) {
+//   navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW register failed', e));
+// }
 </script>
 
 </body>
